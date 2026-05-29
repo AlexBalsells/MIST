@@ -1,6 +1,7 @@
 """Import loss functions to trigger their registration."""
 from mist.loss_functions.losses.dice import DiceLoss  # noqa: F401
 from mist.loss_functions.losses.dice_cross_entropy import DiceCELoss  # noqa: F401
+from mist.loss_functions.losses.weighted_dice_cross_entropy import WTDiceCELoss #noqa: F401
 from mist.loss_functions.losses.cl_dice import CLDice  # noqa: F401
 from mist.loss_functions.losses.generalized_surface import GenSurfLoss  # noqa: F401
 from mist.loss_functions.losses.boundary import BoundaryLoss  # noqa: F401
