@@ -67,7 +67,8 @@ class WTDiceCELoss(SegmentationLoss):
         class_volume += 1 # Avoid division by zero error if class not present in volume
         total_volume = torch.sum(class_volume,dim=[0,1])
         weights = total_volume/class_volume
-
+        
+        #self.cross_entropy = nn.CrossEntropyLoss(weight=weights)
         # 3. Compute Dice Loss.
         numerator = torch.sum(
             torch.square(y_true - y_pred), dim=self.spatial_dims_3d
@@ -84,6 +85,6 @@ class WTDiceCELoss(SegmentationLoss):
         loss_dice = torch.mean(loss) # Mean over batch.
 
         # 4. Compute CE Loss.
-        loss_ce = self.cross_entropy(y_pred_ce, target, weight=weights)
+        loss_ce = self.cross_entropy(y_pred_ce, target)
 
         return 0.5 * (loss_ce + loss_dice)
