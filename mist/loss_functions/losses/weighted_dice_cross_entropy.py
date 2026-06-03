@@ -37,7 +37,7 @@ class WTDiceCELoss(SegmentationLoss):
         # Initialize CE.
         # We do NOT use ignore_index here. We always want CE to penalize
         # background misclassifications, even if Dice ignores them.
-        self.cross_entropy = nn.CrossEntropyLoss()
+        #self.cross_entropy = nn.CrossEntropyLoss()
 
     def forward(
         self,
@@ -59,14 +59,22 @@ class WTDiceCELoss(SegmentationLoss):
         target = y_true.long().squeeze(1)
         y_pred_ce = y_pred
 
+        # 1.5 Compute CE Loss.
+        loss_ce = nn.functional.cross_entropy(y_pred_ce, target, reduction='none') # Shape (B,H,W,D)
+        loss_ce = loss_ce.mean(dim=(1,2,3)) # Shape (B,)
+        loss_ce = loss_ce.mean() #Scalar
+
         # 2. Compute weights
         #   weights: (B, C)
         #   total_volume: scalar
         y_true, y_pred = self.preprocess(y_true, y_pred)
         class_volume = torch.sum(y_true, dim=self.spatial_dims_3d)
-        class_volume += 1 # Avoid division by zero error if class not present in volume
-        total_volume = torch.sum(class_volume,dim=[0,1])
-        weights = total_volume/class_volume
+        #class_volume += 1 # Avoid division by zero error if class not present in volume
+        #total_volume = torch.sum(class_volume,dim=[0,1])
+        #weights = total_volume/class_volume
+        weights = 1.0 / (torch.square(class_volume) + self.avoid_division_by_zero)
+        # Normalize the weights
+        weights = weights / (torch.sum(weights, dim=1, keepdim=True) + self.avoid_division_by_zero)
         
         #self.cross_entropy = nn.CrossEntropyLoss(weight=weights)
         # 3. Compute Dice Loss.
@@ -80,11 +88,12 @@ class WTDiceCELoss(SegmentationLoss):
         )
 
         loss = numerator / denominator # Per class. (B, C)
-        loss = weights * loss # Weights applied to each class.
-        loss = torch.mean(loss, dim=1) # Mean over classes.
+        loss = weights * loss # Weights applied to each class. (B, C)
+        #loss = torch.mean(loss, dim=1) # Mean over classes. (B,)
+        loss = torch.sum(loss, dim=1) # Sum over classes since sum of weights is one. (B, )
         loss_dice = torch.mean(loss) # Mean over batch.
 
         # 4. Compute CE Loss.
-        loss_ce = self.cross_entropy(y_pred_ce, target)
+        #loss_ce = self.cross_entropy(y_pred_ce, target)
 
         return 0.5 * (loss_ce + loss_dice)
