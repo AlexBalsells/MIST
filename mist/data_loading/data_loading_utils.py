@@ -211,6 +211,26 @@ def contrast_fn(img: TensorGPU) -> TensorGPU:
     img = math.clamp(img * scale, min_, max_)
     return img
 
+def cutout_fn(img: TensorGPU) -> TensorGPU:
+    """Apply random masking/cutouts of the image
+    """
+    erase_h = fn.random.uniform(range=(5,25))
+    erase_w = fn.random.uniform(range=(5,25))
+    anchor_x = fn.random.uniform(range(0,0.8))
+    anchor_y = fn.random.uniform(range(0,0.8))
+    img_cutout = fn.erase(
+        img,
+        anchor=[anchor_y,anchor_x],
+        shape=[erase_h,erase_w],
+        axis_names="WH",
+        fill_value=0.0,
+        normalized_anchor=True
+    )
+    # Return the augmented image data with a probability of 0.4.
+    return random_augmentation(
+        constants.CUTOUT_FN_PROBABILITY, img_cutout, img
+    )
+
 
 def validate_train_and_eval_inputs(
         imgs: list[str],

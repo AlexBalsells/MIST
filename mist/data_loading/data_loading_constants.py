@@ -35,3 +35,11 @@ class DataLoadingConstants:
     HORIZONTAL_FLIP_PROBABILITY = 0.5
     VERTICAL_FLIP_PROBABILITY = 0.5
     DEPTH_FLIP_PROBABILITY = 0.5
+
+    # Rotation function constants
+    ROTATION_FN_RANGE_MIN = -10.
+    ROTATION_FN_RANGE_MAX = 10.
+    ROTATION_FN_PROBABILITY = 0.15
+
+    # Cutout function probability
+    CUTOUT_FN_PROBABILITY = 0.4

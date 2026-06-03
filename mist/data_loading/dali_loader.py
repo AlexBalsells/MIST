@@ -158,6 +158,8 @@ class TrainPipeline(GenericPipeline):
         use_blur: bool = True,
         use_brightness: bool = True,
         use_contrast: bool = True,
+        use_rotation: bool = True,
+        use_cutout: bool = True,
         **kwargs,
     ):
         super().__init__(
@@ -214,6 +216,8 @@ class TrainPipeline(GenericPipeline):
             self.use_blur = use_blur
             self.use_brightness = use_brightness
             self.use_contrast = use_contrast
+            self.use_rotation = use_rotation
+            self.use_cutout = use_cutout
 
     def load_data(self):
         """Load the image, label, and DTM data from the input readers."""
@@ -426,6 +430,49 @@ class TrainPipeline(GenericPipeline):
 
         # Return the resized image and label.
         return image, label
+    
+    def rotation_fn(
+            self,
+            image: TensorGPU,
+            label: TensorGPU,
+            dtm: TensorGPU | None = None,
+    ) -> Sequence[TensorGPU]:
+        """Apply random rotations to the input image, labels, and DTMs.
+
+        Apply random rotations to the input data. The rotations can be applied
+        horizontally, vertically, or depthwise with a 0.5 probability.
+
+        Args:
+            image: The input image data to apply rotations to.
+            label: The input label data to apply the same rotations to.
+            dtm: The input DTM data to apply the same rotations to.
+
+        Returns:
+            The rotated image, label, and DTM data.
+        """
+        # Randomly choose a rotation angle between -15 and 15 degrees with a 0.15
+        # probability of applying the augmentation. If not applied, the angle rotation
+        # remains 0.
+        angle = utils.random_augmentation(
+            constants.ROTATION_FN_PROBABILITY,
+            fn.random.uniform(
+                range=(
+                    constants.ROTATION_FN_RANGE_MIN,
+                    constants.ROTATION_FN_RANGE_MAX,
+                )
+            ),
+            0.0,
+        )
+
+        transform_matrix = fn.transforms.make_affine(angle=angle)
+        rot_image = fn.warp_affine(image, matrix=transform_matrix, interp_type=types.INTERP_LINEAR)
+        rot_label = fn.warp_affine(label, matrix=transform_matrix, interp_type=types.INTERP_NN)
+        if self.has_dtms:
+            rot_dtm = fn.warp_affine(dtm, matrix=transform_matrix, interp_type=types.INTERP_LINEAR)
+            return rot_image, rot_label, rot_dtm 
+        return rot_image, rot_label
+
+
 
     def define_graph(self):
         """Define the training pipeline graph for data loading.
@@ -462,6 +509,9 @@ class TrainPipeline(GenericPipeline):
                 if self.use_flips:
                     image, label = self.flips_fn(image, label)
 
+                if self.use_rotation:
+                    image, label = self.rotation_fn(image, label)
+
         # Apply random augmentations to the image data only.
         if self.use_augmentation:
             if self.use_noise:
@@ -472,6 +522,8 @@ class TrainPipeline(GenericPipeline):
                 image = utils.brightness_fn(image)
             if self.use_contrast:
                 image = utils.contrast_fn(image)
+            if self.use_cutout:
+                image = utils.cutout_fn(image)
 
         # Change format to CDWH for PyTorch compatibility.
         image = fn.transpose(image, perm=[3, 0, 1, 2])
