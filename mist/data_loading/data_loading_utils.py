@@ -214,15 +214,17 @@ def contrast_fn(img: TensorGPU) -> TensorGPU:
 def cutout_fn(img: TensorGPU) -> TensorGPU:
     """Apply random masking/cutouts of the image
     """
-    erase_h = fn.random.uniform(range=(5,25))
-    erase_w = fn.random.uniform(range=(5,25))
-    anchor_x = fn.random.uniform(range(0,0.8))
-    anchor_y = fn.random.uniform(range(0,0.8))
+    erase_h = fn.random.uniform(range=(5.,25.))
+    erase_w = fn.random.uniform(range=(5.,25.))
+    anchor_x = fn.random.uniform(range=(0,0.8))
+    anchor_y = fn.random.uniform(range=(0,0.8))
+    shape_node = fn.stack(erase_h,erase_w)
+    anchor_node = fn.stack(anchor_y, anchor_x)
     img_cutout = fn.erase(
         img,
-        anchor=[anchor_y,anchor_x],
-        shape=[erase_h,erase_w],
-        axis_names="WH",
+        anchor=anchor_node,
+        shape=shape_node,
+        axis_names="HW",
         fill_value=0.0,
         normalized_anchor=True
     )
