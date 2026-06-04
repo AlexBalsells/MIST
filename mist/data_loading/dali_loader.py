@@ -158,7 +158,7 @@ class TrainPipeline(GenericPipeline):
         use_blur: bool = True,
         use_brightness: bool = True,
         use_contrast: bool = True,
-        use_rotation: bool = True,
+        use_rotation: bool = False,
         use_cutout: bool = True,
         **kwargs,
     ):
@@ -464,7 +464,7 @@ class TrainPipeline(GenericPipeline):
             0.0,
         )
 
-        transform_matrix = fn.transforms.make_affine(angle=angle)
+        transform_matrix = fn.transforms.rotation(angle=angle)
         rot_image = fn.warp_affine(image, matrix=transform_matrix, interp_type=types.INTERP_LINEAR)
         rot_label = fn.warp_affine(label, matrix=transform_matrix, interp_type=types.INTERP_NN)
         if self.has_dtms:
