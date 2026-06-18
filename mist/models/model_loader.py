@@ -175,7 +175,7 @@ def load_pretrained_encoder(
         )
 
     # Load source weights and strip DDP module. prefix if present.
-    source_sd = torch.load(weights_path, weights_only=True, map_location="cpu")
+    source_sd = torch.load(weights_path, weights_only=False, map_location="cpu")
     if any(k.startswith("module.") for k in source_sd):
         source_sd = OrderedDict(
             {(k[7:] if k.startswith("module.") else k): v
