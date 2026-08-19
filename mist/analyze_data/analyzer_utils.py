@@ -542,6 +542,7 @@ def build_base_config() -> dict[str, Any]:
             "amp": True,
             "augmentation": {
                 "enabled": True,
+                "random_rotation_axis": False,
                 "transforms": {
                     "flips": True,
                     "zoom": True,
@@ -549,6 +550,9 @@ def build_base_config() -> dict[str, Any]:
                     "blur": True,
                     "brightness": True,
                     "contrast": True,
+                    "rotation": False,
+                    "cutout": True,
+                    "channel_dropout": False,
                 },
             },
             "hardware": {

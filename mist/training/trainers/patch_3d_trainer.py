@@ -66,6 +66,14 @@ class Patch3DTrainer(BaseTrainer):
             use_brightness=training["augmentation"]["transforms"]["brightness"],
             use_contrast=training["augmentation"]["transforms"]["contrast"],
             use_zoom=training["augmentation"]["transforms"]["zoom"],
+            use_rotation=training["augmentation"]["transforms"]["rotation"],
+            use_cutout=training["augmentation"]["transforms"]["cutout"],
+            use_channel_dropout=(
+                training["augmentation"]["transforms"]["channel_dropout"]
+            ),
+            n_channels=self.config["model"]["params"]["in_channels"],
+            random_rotation_axis=training["augmentation"]["random_rotation_axis"],
+            target_spacing=self.config["spatial_config"]["target_spacing"],
             rank=rank,
             world_size=world_size,
         )

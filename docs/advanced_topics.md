@@ -89,13 +89,17 @@ Below is an example of a valid `config.json` file.
 
     "augmentation": {
       "enabled": true,
+      "random_rotation_axis": false,
       "transforms": {
         "flips": true,
         "zoom": true,
         "noise": true,
         "blur": true,
         "brightness": true,
-        "contrast": true
+        "contrast": true,
+        "rotation": false,
+        "cutout": true,
+        "channel_dropout": false
       }
     },
 
@@ -1094,6 +1098,9 @@ augmentation transforms are:
 | Blurring     | Random Gaussian blurring                         | `blur`       |
 | Brightness   | Random brightness scaling                        | `brightness` |
 | Contrast     | Random contrast adjustment                       | `contrast`   |
+| Rotation     | Random rotation about the image center, about a spacing-derived axis by default (see below) | `rotation`   |
+| Cutout       | Random rectangular region masked with zeros      | `cutout`     |
+| Channel dropout | Randomly zeroes entire channels (multi-channel inputs only) | `channel_dropout` |
 
 ### How to customize
 
@@ -1102,6 +1109,14 @@ augmentation transforms are:
 `false`.
 - Augmentation is applied only during training. Test-time augmentation is
 controlled in the `inference` section of the configuration file.
+- **Rotation axis:** by default, the rotation axis is picked automatically
+from `spatial_config.target_spacing`: if the volume is anisotropic (max
+spacing / min spacing > 3.0), rotation is fixed to the coarsest
+(lowest-resolution) spatial dimension, so the rotation plane stays within the
+two higher-resolution dimensions. If the volume is isotropic (or spacing is
+unavailable), it falls back to the third (last) spatial dimension. Set
+`"random_rotation_axis": true` to instead draw the rotation axis uniformly
+at random, per sample, from the three canonical spatial axes.
 
 ### Example
 

@@ -41,5 +41,36 @@ class DataLoadingConstants:
     ROTATION_FN_RANGE_MAX = 10.
     ROTATION_FN_PROBABILITY = 0.15
 
+    # Rotation axis vectors, one per DHWC array spatial axis (index 0 = D,
+    # 1 = H, 2 = W), expressed in DALI's (x, y, z) axis convention for
+    # `fn.transforms.rotation`. For DHWC-layout volumetric data, DALI's
+    # (x, y, z) maps to (W, H, D) (i.e., reversed relative to the DHWC
+    # storage/layout order). Rotating about a given array axis leaves that
+    # axis invariant and confines the rotation to the plane of the other two.
+    ROTATION_AXIS_BY_ARRAY_AXIS = (
+        (0.0, 0.0, 1.0),  # array axis 0 (D) -> DALI z.
+        (0.0, 1.0, 0.0),  # array axis 1 (H) -> DALI y.
+        (1.0, 0.0, 0.0),  # array axis 2 (W) -> DALI x.
+    )
+
+    # Fallback array axis (see ROTATION_AXIS_BY_ARRAY_AXIS) used to fix the
+    # rotation axis when spacing is unavailable or the volume is isotropic
+    # (i.e., no single axis is clearly lower-resolution). 2 = last spatial
+    # dimension (W), so rotation happens within the D-H plane by default.
+    ROTATION_DEFAULT_ARRAY_AXIS = 2
+
+    # If (max spacing / min spacing) for a volume's target spacing exceeds
+    # this threshold, the volume is considered anisotropic and the rotation
+    # axis is fixed to its coarsest (lowest-resolution) spatial dimension
+    # instead of ROTATION_DEFAULT_ARRAY_AXIS. Mirrors the anisotropy bar used
+    # elsewhere in MIST for patch-size selection
+    # (analyzer_constants.MAX_DIVIDED_BY_MIN_SPACING_THRESHOLD).
+    ROTATION_AXIS_ANISOTROPY_THRESHOLD = 3.0
+
     # Cutout function probability
     CUTOUT_FN_PROBABILITY = 0.4
+
+    # Channel dropout function constants. This is the probability that any
+    # given channel is independently zeroed out (not an overall probability
+    # of applying the augmentation at all).
+    CHANNEL_DROPOUT_FN_PROBABILITY = 0.1

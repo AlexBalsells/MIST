@@ -4,6 +4,8 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from nvidia.dali import fn
 from nvidia.dali import math
 from nvidia.dali import ops
@@ -234,6 +236,82 @@ def cutout_fn(img: TensorGPU) -> TensorGPU:
     return random_augmentation(
         constants.CUTOUT_FN_PROBABILITY, img_cutout, img
     )
+
+
+def channel_dropout_fn(img: TensorGPU, n_channels: int) -> TensorGPU:
+    """Randomly replace entire channels of a multi-channel image with zeros.
+
+    Each channel is independently zeroed out with probability
+    CHANNEL_DROPOUT_FN_PROBABILITY. If every channel would be dropped for a
+    given sample, the first channel is kept instead so the network never sees
+    an all-zero input.
+
+    Args:
+        img: The image data (DHWC layout) to apply channel dropout to.
+        n_channels: The number of channels in the image, i.e., the size of
+            the last (C) axis.
+
+    Returns:
+        The image data with entire channels randomly replaced by zeros.
+    """
+    if n_channels < 2:
+        return img
+
+    keep_flags = [
+        fn.cast(
+            fn.random.coin_flip(
+                probability=1.0 - constants.CHANNEL_DROPOUT_FN_PROBABILITY
+            ),
+            dtype=types.DALIDataType.FLOAT,
+        )
+        for _ in range(n_channels)
+    ]
+
+    # Guarantee at least one channel survives: if every channel was dropped
+    # for this sample, force the first channel back on.
+    any_kept = keep_flags[0]
+    for flag in keep_flags[1:]:
+        any_kept = any_kept + flag
+    all_dropped = fn.cast(any_kept == 0.0, dtype=types.DALIDataType.FLOAT)
+    keep_flags[0] = keep_flags[0] + all_dropped
+
+    channels = [
+        fn.slice(img, c, 1, axes=[3]) * flag
+        for c, flag in enumerate(keep_flags)
+    ]
+    return fn.cat(*channels, axis=3)
+
+
+def resolve_fixed_rotation_axis(
+        target_spacing: Sequence[float] | None,
+) -> tuple[float, float, float]:
+    """Resolve the fixed rotation axis vector from a dataset's target spacing.
+
+    This is a plain Python (not DALI-graph) computation, since target_spacing
+    is static, known once at pipeline-construction time. If target_spacing is
+    anisotropic (max spacing / min spacing exceeds
+    ROTATION_AXIS_ANISOTROPY_THRESHOLD), the rotation axis is fixed to the
+    coarsest (lowest-resolution) spatial dimension, so the rotation plane
+    stays within the two higher-resolution dimensions. Otherwise (isotropic
+    or no spacing information), it falls back to
+    ROTATION_DEFAULT_ARRAY_AXIS.
+
+    Args:
+        target_spacing: The dataset's target voxel spacing, ordered to match
+            the DHWC array's spatial axes (index 0 = D, 1 = H, 2 = W), or
+            None if unavailable.
+
+    Returns:
+        The rotation axis vector in DALI's (x, y, z) axis convention, ready
+        to pass to fn.transforms.rotation(axis=...).
+    """
+    array_axis = constants.ROTATION_DEFAULT_ARRAY_AXIS
+    if target_spacing is not None:
+        spacing = np.asarray(target_spacing, dtype=np.float64)
+        anisotropy_ratio = spacing.max() / spacing.min()
+        if anisotropy_ratio > constants.ROTATION_AXIS_ANISOTROPY_THRESHOLD:
+            array_axis = int(np.argmax(spacing))
+    return constants.ROTATION_AXIS_BY_ARRAY_AXIS[array_axis]
 
 
 def validate_train_and_eval_inputs(

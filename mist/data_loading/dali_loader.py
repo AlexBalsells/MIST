@@ -140,6 +140,24 @@ class TrainPipeline(GenericPipeline):
             during augmentation.
         use_contrast: Whether to adjust contrast in the input data during
             augmentation.
+        use_rotation: Whether to apply rotation to the input data during
+            augmentation.
+        use_cutout: Whether to apply cutout to the input data during
+            augmentation.
+        use_channel_dropout: Whether to randomly zero out entire channels of
+            the input image during augmentation. Only has an effect when the
+            image has more than one channel.
+        n_channels: The number of channels in the input image. Required when
+            use_channel_dropout is True.
+        random_rotation_axis: Whether the rotation axis (see use_rotation) is
+            drawn uniformly at random per sample from the three canonical
+            spatial axes. If False, the axis is fixed based on
+            target_spacing (see resolve_fixed_rotation_axis).
+        target_spacing: The dataset's target voxel spacing, ordered to match
+            the DHWC array's spatial axes (index 0 = D, 1 = H, 2 = W), used
+            to pick the fixed rotation axis when random_rotation_axis is
+            False. If None, falls back to
+            data_loading_constants.ROTATION_DEFAULT_ARRAY_AXIS.
     """
 
     def __init__(
@@ -160,6 +178,10 @@ class TrainPipeline(GenericPipeline):
         use_contrast: bool = True,
         use_rotation: bool = False,
         use_cutout: bool = True,
+        use_channel_dropout: bool = False,
+        n_channels: int | None = None,
+        random_rotation_axis: bool = False,
+        target_spacing: tuple[float, float, float] | None = None,
         **kwargs,
     ):
         super().__init__(
@@ -201,6 +223,11 @@ class TrainPipeline(GenericPipeline):
         # applying any augmentations, then the input data is returned
         # unmodified. Otherwise, we can control the augmentations applied using
         # the input flags.
+        self.n_channels = n_channels
+        self.random_rotation_axis = random_rotation_axis
+        self.fixed_rotation_axis = utils.resolve_fixed_rotation_axis(
+            target_spacing
+        )
         self.use_augmentation = use_augmentation
         if not self.use_augmentation:
             self.use_flips = False
@@ -209,6 +236,9 @@ class TrainPipeline(GenericPipeline):
             self.use_blur = False
             self.use_brightness = False
             self.use_contrast = False
+            self.use_rotation = False
+            self.use_cutout = False
+            self.use_channel_dropout = False
         else:
             self.use_flips = use_flips
             self.use_zoom = use_zoom
@@ -218,6 +248,7 @@ class TrainPipeline(GenericPipeline):
             self.use_contrast = use_contrast
             self.use_rotation = use_rotation
             self.use_cutout = use_cutout
+            self.use_channel_dropout = use_channel_dropout
 
     def load_data(self):
         """Load the image, label, and DTM data from the input readers."""
@@ -437,22 +468,31 @@ class TrainPipeline(GenericPipeline):
             label: TensorGPU,
             dtm: TensorGPU | None = None,
     ) -> Sequence[TensorGPU]:
-        """Apply random rotations to the input image, labels, and DTMs.
+        """Apply a random rotation to the input image, label, and DTM.
 
-        Apply random rotations to the input data. The rotations can be applied
-        horizontally, vertically, or depthwise with a 0.5 probability.
+        With probability ROTATION_FN_PROBABILITY, rotates the input by an
+        angle drawn uniformly from [ROTATION_FN_RANGE_MIN,
+        ROTATION_FN_RANGE_MAX] degrees about the volume's center. Otherwise
+        the data is returned unmodified.
+
+        By default, the rotation axis is fixed to self.fixed_rotation_axis
+        (see resolve_fixed_rotation_axis), so the rotation plane stays within
+        the two higher-resolution spatial dimensions. If
+        self.random_rotation_axis is True, the axis is instead drawn
+        uniformly at random (per sample) from the three canonical spatial
+        axes.
 
         Args:
-            image: The input image data to apply rotations to.
-            label: The input label data to apply the same rotations to.
-            dtm: The input DTM data to apply the same rotations to.
+            image: The input image data to apply rotation to.
+            label: The input label data to apply the same rotation to.
+            dtm: The input DTM data to apply the same rotation to.
 
         Returns:
             The rotated image, label, and DTM data.
         """
-        # Randomly choose a rotation angle between -15 and 15 degrees with a 0.15
-        # probability of applying the augmentation. If not applied, the angle rotation
-        # remains 0.
+        # Randomly choose a rotation angle between -10 and 10 degrees with a
+        # 0.15 probability of applying the augmentation. If not applied, the
+        # rotation angle remains 0.
         angle = utils.random_augmentation(
             constants.ROTATION_FN_PROBABILITY,
             fn.random.uniform(
@@ -464,12 +504,40 @@ class TrainPipeline(GenericPipeline):
             0.0,
         )
 
-        transform_matrix = fn.transforms.rotation(angle=angle)
+        if self.random_rotation_axis:
+            # Draw the rotation axis uniformly at random, per sample, from
+            # the three canonical spatial axes.
+            axis_idx = fn.cast(
+                fn.random.uniform(range=(0.0, 3.0)),
+                dtype=types.DALIDataType.INT32,
+            )
+            axis = fn.stack(
+                fn.cast(axis_idx == 0, dtype=types.DALIDataType.FLOAT),
+                fn.cast(axis_idx == 1, dtype=types.DALIDataType.FLOAT),
+                fn.cast(axis_idx == 2, dtype=types.DALIDataType.FLOAT),
+            )
+        else:
+            axis = types.Constant(
+                np.array(self.fixed_rotation_axis, dtype=np.float32)
+            )
+
+        # `fn.transforms.rotation`'s axis/center use DALI's (x, y, z) axis
+        # convention, which for DHWC data is (W, H, D). Explicitly center the
+        # rotation on the volume's midpoint; without it, the rotation pivots
+        # on the origin (corner), rotating most of the content out of frame.
+        center = [
+            self.roi_size[2] / 2.0,
+            self.roi_size[1] / 2.0,
+            self.roi_size[0] / 2.0,
+        ]
+        transform_matrix = fn.transforms.rotation(
+            angle=angle, axis=axis, center=center
+        )
         rot_image = fn.warp_affine(image, matrix=transform_matrix, interp_type=types.INTERP_LINEAR)
         rot_label = fn.warp_affine(label, matrix=transform_matrix, interp_type=types.INTERP_NN)
         if self.has_dtms:
             rot_dtm = fn.warp_affine(dtm, matrix=transform_matrix, interp_type=types.INTERP_LINEAR)
-            return rot_image, rot_label, rot_dtm 
+            return rot_image, rot_label, rot_dtm
         return rot_image, rot_label
 
 
@@ -524,6 +592,8 @@ class TrainPipeline(GenericPipeline):
                 image = utils.contrast_fn(image)
             if self.use_cutout:
                 image = utils.cutout_fn(image)
+            if self.use_channel_dropout and self.n_channels and self.n_channels > 1:
+                image = utils.channel_dropout_fn(image, self.n_channels)
 
         # Change format to CDWH for PyTorch compatibility.
         image = fn.transpose(image, perm=[3, 0, 1, 2])
@@ -628,6 +698,12 @@ def get_training_dataset(
     use_blur: bool = True,
     use_brightness: bool = True,
     use_contrast: bool = True,
+    use_rotation: bool = False,
+    use_cutout: bool = True,
+    use_channel_dropout: bool = False,
+    n_channels: int | None = None,
+    random_rotation_axis: bool = False,
+    target_spacing: tuple[float, float, float] | None = None,
 ) -> DALIGenericIterator:
     """Retrieve the appropriate training pipeline based on the input data.
 
@@ -662,6 +738,23 @@ def get_training_dataset(
             augmentation.
         use_contrast: Whether to adjust contrast in the input data during
             augmentation.
+        use_rotation: Whether to apply rotation to the input data during
+            augmentation.
+        use_cutout: Whether to apply cutout to the input data during
+            augmentation.
+        use_channel_dropout: Whether to randomly zero out entire channels of
+            the input image during augmentation. Only has an effect when the
+            image has more than one channel.
+        n_channels: The number of channels in the input image. Required when
+            use_channel_dropout is True.
+        random_rotation_axis: Whether the rotation axis (see use_rotation) is
+            drawn uniformly at random per sample from the three canonical
+            spatial axes, instead of using the fixed axis resolved from
+            target_spacing.
+        target_spacing: The dataset's target voxel spacing, ordered to match
+            the DHWC array's spatial axes (index 0 = D, 1 = H, 2 = W), used
+            to pick the fixed rotation axis when random_rotation_axis is
+            False. See resolve_fixed_rotation_axis.
         seed: Random seed for shuffling or any other randomness in the reader.
         num_workers: The number of workers for data loading.
         rank: The rank of the current process (GPU).
@@ -702,6 +795,12 @@ def get_training_dataset(
         use_blur=use_blur if use_augmentation else False,
         use_brightness=use_brightness if use_augmentation else False,
         use_contrast=use_contrast if use_augmentation else False,
+        use_rotation=use_rotation if use_augmentation else False,
+        use_cutout=use_cutout if use_augmentation else False,
+        use_channel_dropout=use_channel_dropout if use_augmentation else False,
+        n_channels=n_channels,
+        random_rotation_axis=random_rotation_axis,
+        target_spacing=target_spacing,
         **pipe_kwargs
     )
 
