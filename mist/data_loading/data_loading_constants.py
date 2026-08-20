@@ -68,9 +68,9 @@ class DataLoadingConstants:
     ROTATION_AXIS_ANISOTROPY_THRESHOLD = 3.0
 
     # Cutout function probability
-    CUTOUT_FN_PROBABILITY = 0.4
+    CUTOUT_FN_PROBABILITY = 0.5
 
     # Channel dropout function constants. This is the probability that any
     # given channel is independently zeroed out (not an overall probability
     # of applying the augmentation at all).
-    CHANNEL_DROPOUT_FN_PROBABILITY = 0.1
+    CHANNEL_DROPOUT_FN_PROBABILITY = 0.33
