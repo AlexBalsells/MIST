@@ -71,6 +71,9 @@ class Patch3DTrainer(BaseTrainer):
             use_channel_dropout=(
                 training["augmentation"]["transforms"]["channel_dropout"]
             ),
+            use_slice_dropout=(
+                training["augmentation"]["transforms"]["slice_dropout"]
+            ),
             n_channels=self.config["model"]["params"]["in_channels"],
             random_rotation_axis=training["augmentation"]["random_rotation_axis"],
             target_spacing=self.config["spatial_config"]["target_spacing"],

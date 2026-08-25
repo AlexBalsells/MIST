@@ -147,6 +147,10 @@ class TrainPipeline(GenericPipeline):
         use_channel_dropout: Whether to randomly zero out entire channels of
             the input image during augmentation. Only has an effect when the
             image has more than one channel.
+        use_slice_dropout: Whether to randomly zero out slices along a
+            randomly chosen spatial axis of the input image during
+            augmentation, applied independently per channel. Applied after
+            channel dropout.
         n_channels: The number of channels in the input image. Required when
             use_channel_dropout is True.
         random_rotation_axis: Whether the rotation axis (see use_rotation) is
@@ -179,6 +183,7 @@ class TrainPipeline(GenericPipeline):
         use_rotation: bool = False,
         use_cutout: bool = True,
         use_channel_dropout: bool = False,
+        use_slice_dropout: bool = False,
         n_channels: int | None = None,
         random_rotation_axis: bool = False,
         target_spacing: tuple[float, float, float] | None = None,
@@ -239,6 +244,7 @@ class TrainPipeline(GenericPipeline):
             self.use_rotation = False
             self.use_cutout = False
             self.use_channel_dropout = False
+            self.use_slice_dropout = False
         else:
             self.use_flips = use_flips
             self.use_zoom = use_zoom
@@ -249,6 +255,7 @@ class TrainPipeline(GenericPipeline):
             self.use_rotation = use_rotation
             self.use_cutout = use_cutout
             self.use_channel_dropout = use_channel_dropout
+            self.use_slice_dropout = use_slice_dropout
 
     def load_data(self):
         """Load the image, label, and DTM data from the input readers."""
@@ -594,6 +601,10 @@ class TrainPipeline(GenericPipeline):
                 image = utils.cutout_fn(image)
             if self.use_channel_dropout and self.n_channels and self.n_channels > 1:
                 image = utils.channel_dropout_fn(image, self.n_channels)
+            if self.use_slice_dropout and self.n_channels:
+                image = utils.slice_dropout_fn(
+                    image, self.n_channels, self.roi_size
+                )
 
         # Change format to CDWH for PyTorch compatibility.
         image = fn.transpose(image, perm=[3, 0, 1, 2])
@@ -701,6 +712,7 @@ def get_training_dataset(
     use_rotation: bool = False,
     use_cutout: bool = True,
     use_channel_dropout: bool = False,
+    use_slice_dropout: bool = False,
     n_channels: int | None = None,
     random_rotation_axis: bool = False,
     target_spacing: tuple[float, float, float] | None = None,
@@ -745,6 +757,10 @@ def get_training_dataset(
         use_channel_dropout: Whether to randomly zero out entire channels of
             the input image during augmentation. Only has an effect when the
             image has more than one channel.
+        use_slice_dropout: Whether to randomly zero out slices along a
+            randomly chosen spatial axis of the input image during
+            augmentation, applied independently per channel. Applied after
+            channel dropout.
         n_channels: The number of channels in the input image. Required when
             use_channel_dropout is True.
         random_rotation_axis: Whether the rotation axis (see use_rotation) is
@@ -798,6 +814,7 @@ def get_training_dataset(
         use_rotation=use_rotation if use_augmentation else False,
         use_cutout=use_cutout if use_augmentation else False,
         use_channel_dropout=use_channel_dropout if use_augmentation else False,
+        use_slice_dropout=use_slice_dropout if use_augmentation else False,
         n_channels=n_channels,
         random_rotation_axis=random_rotation_axis,
         target_spacing=target_spacing,

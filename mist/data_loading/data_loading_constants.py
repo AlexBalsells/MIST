@@ -74,3 +74,9 @@ class DataLoadingConstants:
     # given channel is independently zeroed out (not an overall probability
     # of applying the augmentation at all).
     CHANNEL_DROPOUT_FN_PROBABILITY = 0.33
+
+    # Slice dropout function constants. SLICE_DROPOUT_FN_PROBABILITY is the
+    # probability that any given slice along the randomly chosen spatial
+    # axis is independently zeroed out (not an overall probability of
+    # applying the augmentation at all).
+    SLICE_DROPOUT_FN_PROBABILITY = 0.15

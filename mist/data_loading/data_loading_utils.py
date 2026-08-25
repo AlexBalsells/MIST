@@ -282,6 +282,101 @@ def channel_dropout_fn(img: TensorGPU, n_channels: int) -> TensorGPU:
     return fn.cat(*channels, axis=3)
 
 
+def _spatial_axis_dropout_mask(axis_size: int, array_axis: int) -> TensorGPU:
+    """Build a per-slice dropout mask for one spatial axis of a DHWC image.
+
+    Draws one independent keep/drop flag per slice along array_axis (0 = D,
+    1 = H, 2 = W), then reshapes the flags to broadcast against a DHWC
+    tensor: the mask has axis_size along array_axis and size 1 along every
+    other axis.
+
+    Args:
+        axis_size: The size of the image along array_axis, i.e., the number
+            of slices to draw independent dropout flags for.
+        array_axis: Which DHWC spatial axis (0 = D, 1 = H, 2 = W) the mask
+            is built for.
+
+    Returns:
+        A broadcastable mask, 0.0 for dropped slices and 1.0 for kept
+        slices.
+    """
+    keep_flags = fn.cast(
+        fn.random.coin_flip(
+            probability=1.0 - constants.SLICE_DROPOUT_FN_PROBABILITY,
+            shape=[axis_size],
+        ),
+        dtype=types.DALIDataType.FLOAT,
+    )
+    mask_shape = [1, 1, 1, 1]
+    mask_shape[array_axis] = axis_size
+    return fn.reshape(keep_flags, shape=mask_shape)
+
+
+def _slice_dropout_channel_fn(
+        channel: TensorGPU,
+        roi_size: Sequence[int],
+) -> TensorGPU:
+    """Apply slice dropout to a single-channel DHWC volume.
+
+    Selects one of the three spatial axes (D, H, or W) uniformly at random,
+    then independently zeroes out each slice along that axis with
+    probability SLICE_DROPOUT_FN_PROBABILITY.
+
+    Args:
+        channel: A single-channel image (DHW1 layout) to apply slice
+            dropout to.
+        roi_size: The (D, H, W) spatial size of channel.
+
+    Returns:
+        The channel with random slices, along one randomly chosen spatial
+        axis, zeroed out.
+    """
+    axis_idx = fn.cast(
+        fn.random.uniform(range=(0.0, 3.0)), dtype=types.DALIDataType.INT32
+    )
+
+    dropped = None
+    for array_axis, axis_size in enumerate(roi_size):
+        is_axis = fn.cast(
+            axis_idx == array_axis, dtype=types.DALIDataType.FLOAT
+        )
+        masked = channel * _spatial_axis_dropout_mask(axis_size, array_axis)
+        contribution = is_axis * masked
+        dropped = contribution if dropped is None else dropped + contribution
+    return dropped
+
+
+def slice_dropout_fn(
+        img: TensorGPU,
+        n_channels: int,
+        roi_size: Sequence[int],
+) -> TensorGPU:
+    """Randomly zero out slices along a randomly chosen spatial axis.
+
+    For each channel independently, one of the three spatial axes (D, H, or
+    W) is selected uniformly at random. Slices along that axis, i.e.,
+    img[i, :, :] if D is selected, are then independently replaced with
+    zeros with probability SLICE_DROPOUT_FN_PROBABILITY.
+
+    Args:
+        img: The image data (DHWC layout) to apply slice dropout to.
+        n_channels: The number of channels in the image, i.e., the size of
+            the last (C) axis.
+        roi_size: The (D, H, W) spatial size of img.
+
+    Returns:
+        The image data with random slices zeroed out along an
+        independently, randomly chosen spatial axis per channel.
+    """
+    channels = [
+        _slice_dropout_channel_fn(fn.slice(img, c, 1, axes=[3]), roi_size)
+        for c in range(n_channels)
+    ]
+    if n_channels < 2:
+        return channels[0]
+    return fn.cat(*channels, axis=3)
+
+
 def resolve_fixed_rotation_axis(
         target_spacing: Sequence[float] | None,
 ) -> tuple[float, float, float]:

@@ -553,6 +553,7 @@ def build_base_config() -> dict[str, Any]:
                     "rotation": False,
                     "cutout": True,
                     "channel_dropout": False,
+                    "slice_dropout": False,
                 },
             },
             "hardware": {

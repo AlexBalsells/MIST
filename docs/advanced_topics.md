@@ -99,7 +99,8 @@ Below is an example of a valid `config.json` file.
         "contrast": true,
         "rotation": false,
         "cutout": true,
-        "channel_dropout": false
+        "channel_dropout": false,
+        "slice_dropout": false
       }
     },
 
@@ -1101,6 +1102,7 @@ augmentation transforms are:
 | Rotation     | Random rotation about the image center, about a spacing-derived axis by default (see below) | `rotation`   |
 | Cutout       | Random rectangular region masked with zeros      | `cutout`     |
 | Channel dropout | Randomly zeroes entire channels (multi-channel inputs only) | `channel_dropout` |
+| Slice dropout | Randomly zeroes slices along one randomly chosen spatial axis, independently per channel | `slice_dropout` |
 
 ### How to customize
 
