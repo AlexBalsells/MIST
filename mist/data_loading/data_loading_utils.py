@@ -243,8 +243,8 @@ def channel_dropout_fn(img: TensorGPU, n_channels: int) -> TensorGPU:
 
     Each channel is independently zeroed out with probability
     CHANNEL_DROPOUT_FN_PROBABILITY. If every channel would be dropped for a
-    given sample, the first channel is kept instead so the network never sees
-    an all-zero input.
+    given sample, one channel chosen uniformly at random is kept instead so the
+    network never sees an all-zero input and no channel is favored.
 
     Args:
         img: The image data (DHWC layout) to apply channel dropout to.
@@ -268,12 +268,16 @@ def channel_dropout_fn(img: TensorGPU, n_channels: int) -> TensorGPU:
     ]
 
     # Guarantee at least one channel survives: if every channel was dropped
-    # for this sample, force the first channel back on.
+    # for this sample, force one uniformly chosen channel back on.
     any_kept = keep_flags[0]
     for flag in keep_flags[1:]:
         any_kept = any_kept + flag
     all_dropped = fn.cast(any_kept == 0.0, dtype=types.DALIDataType.FLOAT)
-    keep_flags[0] = keep_flags[0] + all_dropped
+    fallback = fn.random.uniform(values=[float(c) for c in range(n_channels)])
+    keep_flags = [
+        flag + all_dropped * fn.cast(fallback == float(c), dtype=types.DALIDataType.FLOAT)
+        for c, flag in enumerate(keep_flags)
+    ]
 
     channels = [
         fn.slice(img, c, 1, axes=[3]) * flag

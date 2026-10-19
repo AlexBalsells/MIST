@@ -249,11 +249,20 @@ def add_train_args(parser: ArgParser) -> None:
              "Accepts a single fold checkpoint or the output of mist_average_weights.",
     )
     g.add_argument(
+        "--pretrained-weights-full",
+        type=str,
+        default=None,
+        help="Path to a checkpoint to initialize the ENTIRE model (encoder "
+             "and decoder) from. The source must match the target model "
+             "exactly. Cannot be combined with --pretrained-weights.",
+    )
+    g.add_argument(
         "--pretrained-config",
         type=str,
         default=None,
         help="Path to the source model's config.json for encoder compatibility "
-             "validation. Required when --pretrained-weights is set.",
+             "validation. Required when --pretrained-weights or "
+             "--pretrained-weights-full is set.",
     )
     g.add_argument(
         "--input-channel-strategy",

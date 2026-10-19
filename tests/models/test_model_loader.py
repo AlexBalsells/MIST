@@ -9,6 +9,7 @@ from mist.models.model_loader import (
     average_fold_weights,
     validate_encoder_compatibility,
     load_pretrained_encoder,
+    load_pretrained_full,
     validate_mist_config_for_model_loading,
     load_model_from_config
 )
@@ -608,3 +609,45 @@ def test_load_pretrained_encoder_incompatible_shape_is_skipped(
 
     _, summary = load_pretrained_encoder(_IncompatibleModel(), source_checkpoint)
     assert first_key in summary["skipped"]
+
+
+# ---------------------------------------------------------------------------
+# load_pretrained_full tests
+# ---------------------------------------------------------------------------
+
+def _make_nnunet(out_channels):
+    return NNUNet(
+        in_channels=1,
+        out_channels=out_channels,
+        patch_size=[32, 32, 32],
+        target_spacing=[1.0, 1.0, 1.0],
+        use_residual_blocks=False,
+        use_deep_supervision=False,
+        use_pocket_model=True,
+    )
+
+
+def test_load_pretrained_full_loads_encoder_and_decoder(
+    nnunet_source, source_checkpoint
+):
+    """Every tensor, decoder included, matches the source after loading."""
+    target = load_pretrained_full(_make_nnunet(2), source_checkpoint)
+    for key, value in nnunet_source.state_dict().items():
+        assert torch.equal(value, target.state_dict()[key])
+
+
+def test_load_pretrained_full_strips_ddp_prefix(nnunet_source, tmp_path):
+    """Checkpoints saved from a DDP-wrapped model load correctly."""
+    path = str(tmp_path / "ddp.pt")
+    torch.save(
+        {f"module.{k}": v for k, v in nnunet_source.state_dict().items()}, path
+    )
+    target = load_pretrained_full(_make_nnunet(2), path)
+    for key, value in nnunet_source.state_dict().items():
+        assert torch.equal(value, target.state_dict()[key])
+
+
+def test_load_pretrained_full_raises_on_shape_mismatch(source_checkpoint):
+    """A different number of output channels is rejected, not skipped."""
+    with pytest.raises(ValueError, match="shape mismatch"):
+        load_pretrained_full(_make_nnunet(3), source_checkpoint)

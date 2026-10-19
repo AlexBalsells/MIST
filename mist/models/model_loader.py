@@ -235,6 +235,54 @@ def load_pretrained_encoder(
     return model, summary
 
 
+def load_pretrained_full(
+    model: torch.nn.Module,
+    weights_path: str,
+) -> torch.nn.Module:
+    """Load pretrained weights into the entire model (encoder and decoder).
+
+    Unlike load_pretrained_encoder, nothing keeps its random initialization:
+    the source state dict must match the target model exactly (same keys and
+    tensor shapes), which means the source and target must share architecture,
+    in/out channels, patch size, and target spacing.
+
+    Args:
+        model: Target MIST model.
+        weights_path: Path to the source checkpoint (.pt or .pth). This can be
+            a single fold checkpoint or the output of average_fold_weights().
+
+    Returns:
+        The model with all weights loaded.
+
+    Raises:
+        ValueError: If the source keys or tensor shapes do not match the model.
+    """
+    source_sd = torch.load(weights_path, weights_only=False, map_location="cpu")
+    if any(k.startswith("module.") for k in source_sd):
+        source_sd = OrderedDict(
+            {(k[7:] if k.startswith("module.") else k): v
+             for k, v in source_sd.items()}
+        )
+
+    target_sd = model.state_dict()
+    missing = sorted(set(target_sd) - set(source_sd))
+    unexpected = sorted(set(source_sd) - set(target_sd))
+    mismatched = sorted(
+        k for k in set(target_sd) & set(source_sd)
+        if source_sd[k].shape != target_sd[k].shape
+    )
+    if missing or unexpected or mismatched:
+        raise ValueError(
+            f"Cannot fully load weights from {weights_path}: "
+            f"{len(missing)} missing key(s), {len(unexpected)} unexpected "
+            f"key(s), {len(mismatched)} shape mismatch(es). "
+            f"First problems: {(missing + unexpected + mismatched)[:5]}"
+        )
+
+    model.load_state_dict(source_sd, strict=True)
+    return model
+
+
 def validate_mist_config_for_model_loading(config: dict) -> None:
     """Validate structure of the MIST configuration.
 

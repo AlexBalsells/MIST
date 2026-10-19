@@ -32,6 +32,7 @@ from mist.utils.console import (
 from mist.models.model_registry import get_model_from_registry
 from mist.models.model_loader import (
     load_pretrained_encoder,
+    load_pretrained_full,
     validate_encoder_compatibility,
 )
 from mist.loss_functions.loss_registry import get_loss
@@ -395,17 +396,27 @@ class BaseTrainer(ABC):
         mismatches fail fast rather than inside a spawned worker.
         """
         pretrained_weights = getattr(self.mist_args, "pretrained_weights", None)
+        pretrained_full = getattr(
+            self.mist_args, "pretrained_weights_full", None
+        )
         pretrained_config_path = getattr(
             self.mist_args, "pretrained_config", None
         )
 
-        if not pretrained_weights:
+        if pretrained_weights and pretrained_full:
+            raise ValueError(
+                "--pretrained-weights and --pretrained-weights-full are "
+                "mutually exclusive."
+            )
+
+        if not (pretrained_weights or pretrained_full):
             return
 
         if not pretrained_config_path:
             warnings.warn(
-                "--pretrained-weights is set but --pretrained-config was not "
-                "provided. Skipping encoder compatibility validation."
+                "--pretrained-weights/--pretrained-weights-full is set but "
+                "--pretrained-config was not provided. Skipping "
+                "compatibility validation."
             )
             return
 
@@ -582,6 +593,20 @@ class BaseTrainer(ABC):
                     f"(input conv adapted via '{strategy}')\n"
                     f"  Skipped:                  {n_skipped} tensor(s) "
                     f"(shape mismatch — kept random init)"
+                )
+
+        # Load pretrained weights for the whole model (encoder and decoder) if
+        # requested. The source must match the target model exactly.
+        pretrained_full = getattr(
+            self.mist_args, "pretrained_weights_full", None
+        )
+        if pretrained_full:
+            model = load_pretrained_full(model, pretrained_full)
+            if rank == 0:
+                n_params = sum(p.numel() for p in model.parameters())
+                print_info(
+                    f"Full pretrained model loaded from {pretrained_full}\n"
+                    f"  Loaded: all tensors ({n_params:,} parameters)"
                 )
 
         use_ddp = world_size > 1
