@@ -32,6 +32,8 @@ class Patch3DTrainer(BaseTrainer):
                 - "train_images": List of paths to training images.
                 - "train_labels": List of paths to training labels.
                 - "train_dtms": List of paths to DTM images (optional).
+                - "train_presence": List of paths to per-scan class presence
+                    vectors (optional).
                 - "val_images": List of paths to validation images.
                 - "val_labels": List of paths to validation labels.
             rank: The rank of the current process in distributed training.
@@ -53,6 +55,7 @@ class Patch3DTrainer(BaseTrainer):
             image_paths=fold_data["train_images"],
             label_paths=fold_data["train_labels"],
             dtm_paths=fold_data["train_dtms"],
+            presence_paths=fold_data.get("train_presence"),
             batch_size=training["batch_size_per_gpu"],
             oversampling=training["dali_foreground_prob"],
             labels=train_labels,
@@ -125,6 +128,11 @@ class Patch3DTrainer(BaseTrainer):
         label = batch["label"]
         dtm = batch.get("dtm", None)
 
+        # Per-scan class presence is only provided for presence-aware losses.
+        extra_loss_kwargs = {}
+        if "presence" in batch:
+            extra_loss_kwargs["present"] = batch["presence"]
+
         max_norm = self.config["training"].get(
             "grad_clip_norm", constants.GRAD_CLIP_VALUE
         )
@@ -141,6 +149,7 @@ class Patch3DTrainer(BaseTrainer):
                     y_supervision=y_deep_supervision,
                     alpha=alpha,
                     dtm=dtm,
+                    **extra_loss_kwargs,
                 )
 
             scaler.scale(loss).backward()
@@ -158,6 +167,7 @@ class Patch3DTrainer(BaseTrainer):
                 y_supervision=y_deep_supervision,
                 alpha=alpha,
                 dtm=dtm,
+                **extra_loss_kwargs,
             )
 
             loss.backward()

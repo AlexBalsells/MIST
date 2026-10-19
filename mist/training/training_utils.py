@@ -1,6 +1,9 @@
 """Utility functions for MIST trainers."""
+import os
 from pathlib import Path
 from collections.abc import Sequence
+
+import numpy as np
 
 
 class RunningMean:
@@ -149,6 +152,52 @@ def sanity_check_fold_data(
             raise ValueError(
                 f"Fold {fold} image/DTM stem mismatch in training set."
             )
+
+
+def get_presence_paths(
+    label_paths: Sequence[str | Path],
+    presence_dir: str | Path,
+    n_classes: int,
+) -> list[str]:
+    """Get (and create if needed) per-scan class-presence .npy files.
+
+    For each label volume, the presence file is a float32 vector of length
+    n_classes. Entry c is 1 if class c has at least one voxel in the whole
+    scan and 0 otherwise. The background (class 0) is always marked present.
+    Files are regenerated when the label file is newer than the presence file.
+
+    Args:
+        label_paths: Paths to the label .npy volumes.
+        presence_dir: Directory where the presence files are stored.
+        n_classes: Number of classes, including background.
+
+    Returns:
+        List of paths to the presence files, in the same order as label_paths.
+    """
+    presence_dir = Path(presence_dir)
+    presence_dir.mkdir(parents=True, exist_ok=True)
+    out = []
+    for label_path in label_paths:
+        label_path = Path(label_path)
+        presence_path = presence_dir / label_path.name
+        stale = (
+            not presence_path.exists() or
+            presence_path.stat().st_mtime < label_path.stat().st_mtime
+        )
+        if stale:
+            values = np.unique(np.load(label_path, mmap_mode="r"))
+            present = np.zeros(n_classes, dtype=np.float32)
+            present[values[(values >= 0) & (values < n_classes)].astype(int)] = 1.0
+            present[0] = 1.0
+
+            # Write atomically since several ranks may build the same file.
+            tmp_path = presence_path.with_name(
+                f"{presence_path.stem}.{os.getpid()}.tmp.npy"
+            )
+            np.save(tmp_path, present)
+            os.replace(tmp_path, presence_path)
+        out.append(str(presence_path.resolve()))
+    return out
 
 
 def get_npy_paths(

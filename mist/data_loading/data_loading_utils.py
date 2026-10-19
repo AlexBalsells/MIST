@@ -413,6 +413,7 @@ def validate_train_and_eval_inputs(
         imgs: list[str],
         lbls: list[str],
         dtms: list[str] | None = None,
+        presence: list[str] | None = None,
 ) -> None:
     """Validate that the input data is correct.
 
@@ -423,6 +424,7 @@ def validate_train_and_eval_inputs(
         imgs: List of image file paths.
         lbls: List of label file paths.
         dtms: Optional list of DTM data file paths. Defaults to None.
+        presence: Optional list of class presence file paths. Defaults to None.
 
     Raises:
         ValueError: If the number of images, labels, or DTMs are incorrect.
@@ -441,6 +443,10 @@ def validate_train_and_eval_inputs(
             raise ValueError("No DTM data found!")
         if len(imgs) != len(dtms):
             raise ValueError("Number of images and DTMs do not match!")
+
+    if presence is not None:
+        if len(imgs) != len(presence):
+            raise ValueError("Number of images and presence files do not match!")
 
 
 def is_valid_generic_pipeline_input(input_data: Any) -> bool:

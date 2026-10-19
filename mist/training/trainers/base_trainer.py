@@ -37,6 +37,7 @@ from mist.models.model_loader import (
 from mist.loss_functions.loss_registry import get_loss
 from mist.loss_functions.deep_supervision_wrapper import DeepSupervisionLoss
 from mist.loss_functions.losses.dice import DiceLoss
+from mist.loss_functions.losses.masked_dice import MaskedDiceLoss
 from mist.loss_functions.alpha_schedulers import (
     get_alpha_scheduler,
     get_default_scheduler_config,
@@ -93,7 +94,12 @@ class BaseTrainer(ABC):
         self._setup_folds()
 
         # Set up validation loss.
-        self.validation_loss = DiceLoss(exclude_background=True)
+        # Losses that ignore classes without ground truth validate the same
+        # way. Validation uses full scans, so presence is read off the label.
+        if self._use_presence():
+            self.validation_loss = MaskedDiceLoss(exclude_background=True)
+        else:
+            self.validation_loss = DiceLoss(exclude_background=True)
 
         # Validate pretrained encoder config if provided. This runs once in
         # the main process before any spawned training processes start, so
@@ -413,6 +419,13 @@ class BaseTrainer(ABC):
             in TrainerConstants.DTM_AWARE_LOSSES
         )
 
+    def _use_presence(self) -> bool:
+        """Return True when the selected loss needs per-scan class presence."""
+        return (
+            self.config["training"]["loss"]["name"]
+            in TrainerConstants.PRESENCE_AWARE_LOSSES
+        )
+
     def _setup_folds(self) -> None:
         """Setup data paths and parameters for a specific fold.
 
@@ -461,6 +474,16 @@ class BaseTrainer(ABC):
                     patient_ids=train_ids,
                 )
 
+            # If the loss ignores classes without ground truth, get the
+            # per-scan class presence files for the training labels.
+            train_presence = None
+            if self._use_presence():
+                train_presence = training_utils.get_presence_paths(
+                    label_paths=train_labels,
+                    presence_dir=self.numpy_dir / "presence",
+                    n_classes=len(self.config["dataset_info"]["labels"]),
+                )
+
             # Split training data into training and validation sets if the
             # validation percentage is greater than zero. The idea here is to
             # leave the original validation set as an unseen test set and use
@@ -470,6 +493,8 @@ class BaseTrainer(ABC):
                 split_inputs = [train_images, train_labels]
                 if self._use_dtms():
                     split_inputs.append(train_dtms)
+                if self._use_presence():
+                    split_inputs.append(train_presence)
 
                 splits = train_test_split(
                     *split_inputs,
@@ -480,10 +505,13 @@ class BaseTrainer(ABC):
                 # Unpack while handling optional DTMs.
                 (
                     train_images, val_images, train_labels,
-                    val_labels, *maybe_dtms
+                    val_labels, *maybe_extras
                 ) = splits
+                extras = iter(maybe_extras)
                 if self._use_dtms():
-                    train_dtms, _ = maybe_dtms
+                    train_dtms, _ = next(extras), next(extras)
+                if self._use_presence():
+                    train_presence, _ = next(extras), next(extras)
 
             # Sanity check the fold data.
             training_utils.sanity_check_fold_data(
@@ -501,6 +529,7 @@ class BaseTrainer(ABC):
             self.folds[fold]["val_images"] = val_images
             self.folds[fold]["val_labels"] = val_labels
             self.folds[fold]["train_dtms"] = train_dtms
+            self.folds[fold]["train_presence"] = train_presence
             self.folds[fold]["steps_per_epoch"] = max(
                 training["min_steps_per_epoch"],
                 math.ceil(len(train_images) / max(1, self.batch_size)),

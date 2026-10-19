@@ -40,6 +40,7 @@ class GenericPipeline(Pipeline):
         input_image_files: list[str] | None = None,
         input_label_files: list[str] | None = None,
         input_dtm_files: list[str] | None = None,
+        input_presence_files: list[str] | None = None,
     ):
         """Initialize the pipeline with the given parameters.
 
@@ -56,6 +57,8 @@ class GenericPipeline(Pipeline):
             input_x_files: List of file paths to the image data.
             input_y_files: List of file paths to the label data.
             input_dtm_files: List of file paths to the DTM data.
+            input_presence_files: List of file paths to the per-scan class
+                presence vectors (one float vector per case).
         """
         super().__init__(
             batch_size=batch_size,
@@ -103,6 +106,20 @@ class GenericPipeline(Pipeline):
             else:
                 raise ValueError(
                     "Input DTMs are not valid. Please check the input paths."
+                )
+        if input_presence_files:
+            if utils.is_valid_generic_pipeline_input(input_presence_files):
+                self.input_presence = utils.get_numpy_reader(
+                    files=input_presence_files,
+                    shard_id=shard_id,
+                    seed=seed,
+                    num_shards=num_gpus,
+                    shuffle=shuffle_input,
+                )
+            else:
+                raise ValueError(
+                    "Input presence files are not valid. Please check the "
+                    "input paths."
                 )
 
 
@@ -172,6 +189,7 @@ class TrainPipeline(GenericPipeline):
         roi_size: tuple[int, int, int],
         labels: list[int] | None,
         oversampling: float | None,
+        presence_paths: list[str] | None = None,
         extract_patches: bool = True,
         use_augmentation: bool = True,
         use_flips: bool = True,
@@ -193,10 +211,12 @@ class TrainPipeline(GenericPipeline):
             input_image_files=image_paths,
             input_label_files=label_paths,
             input_dtm_files=dtm_paths,
+            input_presence_files=presence_paths,
             shuffle_input=True,
             **kwargs
         )
         self.has_dtms = dtm_paths is not None
+        self.has_presence = presence_paths is not None
 
         # If we are not extracting patches, then the entire image is output for
         # training. This is useful for models that do not require patch-based
@@ -550,6 +570,14 @@ class TrainPipeline(GenericPipeline):
 
 
     def define_graph(self):
+        """Define the training graph, appending class presence if used."""
+        outputs = self.build_outputs()
+        if self.has_presence:
+            presence = self.input_presence(name="presence_reader")
+            return (*outputs, presence.gpu())
+        return outputs
+
+    def build_outputs(self):
         """Define the training pipeline graph for data loading.
 
         This function defines the training pipeline graph for loading and
@@ -716,6 +744,7 @@ def get_training_dataset(
     n_channels: int | None = None,
     random_rotation_axis: bool = False,
     target_spacing: tuple[float, float, float] | None = None,
+    presence_paths: list[str] | None = None,
 ) -> DALIGenericIterator:
     """Retrieve the appropriate training pipeline based on the input data.
 
@@ -730,6 +759,9 @@ def get_training_dataset(
         image_paths: List of file paths to the image data.
         label_paths: List of file paths to the label data.
         dtm_paths: List of file paths to the DTM data.
+        presence_paths: Optional list of file paths to per-scan class presence
+            vectors. When given, the iterator also yields "presence" with
+            shape (batch_size, num_classes).
         batch_size: The batch size for training.
         roi_size: The size of the region of interest (ROI) used for training.
         extract_patches: Whether to extract patches from the input data. If
@@ -783,7 +815,9 @@ def get_training_dataset(
         AssertionError: If the input data is invalid or missing.
     """
     # Check that inputs are valid.
-    utils.validate_train_and_eval_inputs(image_paths, label_paths, dtm_paths)
+    utils.validate_train_and_eval_inputs(
+        image_paths, label_paths, dtm_paths, presence_paths
+    )
 
     # Configure the DALI pipeline based on the input parameters.
     pipe_kwargs = {
@@ -800,6 +834,7 @@ def get_training_dataset(
         image_paths=image_paths,
         label_paths=label_paths,
         dtm_paths=dtm_paths,
+        presence_paths=presence_paths,
         roi_size=roi_size,
         labels=labels,
         oversampling=oversampling,
@@ -823,9 +858,12 @@ def get_training_dataset(
 
     # Return a DALI iterator for the training data. If DTM data is provided,
     # include it in the iterator. Otherwise, return an iterator without DTMs.
+    output_names = ["image", "label"]
     if dtm_paths:
-        return DALIGenericIterator(pipeline, ["image", "label", "dtm"])
-    return DALIGenericIterator(pipeline, ["image", "label"])
+        output_names.append("dtm")
+    if presence_paths:
+        output_names.append("presence")
+    return DALIGenericIterator(pipeline, output_names)
 
 
 def get_validation_dataset(

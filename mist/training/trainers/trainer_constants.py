@@ -20,6 +20,9 @@ class TrainerConstants:
     # Loss names that require precomputed distance transform maps (DTMs).
     DTM_AWARE_LOSSES: frozenset[str] = frozenset({"bl", "hdos", "gsl"})
 
+    # Loss names that need per-scan class presence (classes with ground truth).
+    PRESENCE_AWARE_LOSSES: frozenset[str] = frozenset({"dice_ce_masked"})
+
     # Loss names that blend two terms via a schedulable alpha weight.
     COMPOSITE_LOSSES: frozenset[str] = frozenset(
         {"bl", "hdos", "gsl", "cldice", "volumetric_sddl", "vessel_sddl"}
