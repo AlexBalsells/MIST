@@ -540,6 +540,7 @@ def build_base_config() -> dict[str, Any]:
             "l2_penalty": 0.0001,
             "grad_clip_norm": 1.0,
             "amp": True,
+            "amp_dtype": "fp16",
             "augmentation": {
                 "enabled": True,
                 "random_rotation_axis": False,

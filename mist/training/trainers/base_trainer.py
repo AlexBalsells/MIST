@@ -106,6 +106,7 @@ class BaseTrainer(ABC):
         # the main process before any spawned training processes start, so
         # incompatible configs fail fast.
         self._validate_pretrained_config()
+        self._validate_amp_dtype()
 
     def __getstate__(self):
         """Customize pickling so mp.spawn can serialize this object."""
@@ -430,6 +431,40 @@ class BaseTrainer(ABC):
             in TrainerConstants.DTM_AWARE_LOSSES
         )
 
+    def _amp_dtype(self) -> torch.dtype | None:
+        """Return the autocast dtype from training.amp and training.amp_dtype.
+
+        training.amp turns mixed precision on or off. training.amp_dtype picks
+        its precision: "fp16" (default when the key is missing) or "bf16".
+        Returns None when amp is off.
+
+        Raises:
+            ValueError: If amp_dtype is not "fp16" or "bf16".
+        """
+        training = self.config["training"]
+        if not training["amp"]:
+            return None
+        name = training.get("amp_dtype", "fp16")
+        dtypes = {"fp16": torch.float16, "bf16": torch.bfloat16}
+        if name not in dtypes:
+            raise ValueError(
+                f"training.amp_dtype must be one of {sorted(dtypes)}, got "
+                f"'{name}'."
+            )
+        return dtypes[name]
+
+    def _validate_amp_dtype(self) -> None:
+        """Fail fast in the main process if the dtype is unsupported here."""
+        dtype = self._amp_dtype()
+        if dtype == torch.bfloat16 and torch.cuda.is_available():
+            if torch.cuda.get_device_capability()[0] < 8:
+                raise ValueError(
+                    "training.amp_dtype is 'bf16' but this GPU "
+                    f"({torch.cuda.get_device_name()}) has no bf16 support "
+                    "(needs compute capability 8.0+, e.g., A100/H100). Use "
+                    "'fp16' on V100-class GPUs."
+                )
+
     def _use_presence(self) -> bool:
         """Return True when the selected loss needs per-scan class presence."""
         return (
@@ -670,9 +705,13 @@ class BaseTrainer(ABC):
             warmup_epochs=training.get("warmup_epochs", 0),
         )
 
-        # Get gradient scaler if AMP is enabled.
-        scaler = torch.amp.GradScaler(
-            "cuda") if training["amp"] else None  # type: ignore
+        # Get gradient scaler. Only fp16 needs loss scaling; bf16 has the same
+        # exponent range as fp32 so it trains without a scaler.
+        autocast_dtype = self._amp_dtype()
+        scaler = (
+            torch.amp.GradScaler("cuda")  # type: ignore
+            if autocast_dtype == torch.float16 else None
+        )
 
         return {
             "model": model,
@@ -681,6 +720,7 @@ class BaseTrainer(ABC):
             "optimizer": optimizer,
             "lr_scheduler": lr_scheduler,
             "scaler": scaler,
+            "autocast_dtype": autocast_dtype,
             "epoch": 0,
             "global_step": 0,
             "best_val_loss": np.inf,
@@ -715,6 +755,10 @@ class BaseTrainer(ABC):
             "optimizer_state_dict": state["optimizer"].state_dict(),
             "lr_scheduler_state_dict": state["lr_scheduler"].state_dict(),
             "scaler_state_dict": scaler.state_dict() if scaler is not None else None,
+            "amp_dtype": (
+                self.config["training"].get("amp_dtype", "fp16")
+                if self.config["training"]["amp"] else None
+            ),
         }
         # Write to a temp file then atomically rename so a mid-write SIGKILL
         # never leaves a corrupted checkpoint on disk.
@@ -742,6 +786,20 @@ class BaseTrainer(ABC):
             return False
 
         checkpoint = torch.load(path, weights_only=False)
+
+        # Resuming under a different precision would silently change the
+        # training recipe (and the scaler state would not apply). Checkpoints
+        # from before amp_dtype existed carry no key and are not checked.
+        current_amp = (
+            self.config["training"].get("amp_dtype", "fp16")
+            if self.config["training"]["amp"] else None
+        )
+        if "amp_dtype" in checkpoint and checkpoint["amp_dtype"] != current_amp:
+            raise ValueError(
+                f"Cannot resume fold {fold}: checkpoint was trained with "
+                f"amp_dtype={checkpoint['amp_dtype']}, config now has "
+                f"amp_dtype={current_amp}."
+            )
 
         # Restore model weights (unwrap DDP before loading).
         model = state["model"]

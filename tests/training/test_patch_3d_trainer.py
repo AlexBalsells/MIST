@@ -455,3 +455,38 @@ def test_validation_step_calls_sliding_window_and_validation_loss(
     # Ensure validation loss consumed y_true/y_pred.
     assert captured["y_true"] is not None
     assert captured["y_pred"] is not None
+
+
+def test_training_step_bf16_autocasts_without_scaler(
+    tmp_pipeline, mist_args, monkeypatch,
+):
+    """bf16 runs under autocast(bfloat16) and needs no GradScaler."""
+    t = Patch3DTrainer(mist_args)
+    model = DummyModel()
+    opt = torch.optim.SGD(model.parameters(), lr=0.1)
+
+    seen = {}
+
+    class _Spy:
+        def __enter__(self): return self
+        def __exit__(self, exc_type, exc, tb): return False
+
+    def _fake_autocast(*args, **kwargs):
+        seen.update(kwargs)
+        return _Spy()
+
+    monkeypatch.setattr(torch, "autocast", _fake_autocast)
+
+    state = {
+        "model": model, "optimizer": opt, "scaler": None,
+        "autocast_dtype": torch.bfloat16,
+        "loss_function": lambda **kw: (kw["y_pred"] - kw["y_true"]).pow(2).mean(),
+        "composite_loss_weighting": None, "epoch": 0, "global_step": 0,
+        "alpha": 0.5,
+    }
+    batch = {
+        "image": torch.zeros(2, 4), "label": torch.zeros(2, 4), "dtm": None,
+    }
+    loss = t.training_step(state=state, data=batch)
+    assert isinstance(loss, torch.Tensor)
+    assert seen["dtype"] == torch.bfloat16

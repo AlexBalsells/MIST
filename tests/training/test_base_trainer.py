@@ -1526,3 +1526,78 @@ def test_train_fold_logs_alpha_for_composite_loss(
     # Each logged alpha value should be the fixed 0.7 returned by the stub.
     for _, value, _ in alpha_entries:
         assert value == pytest.approx(0.7)
+
+
+# =============================================
+# amp_dtype
+# =============================================
+
+@pytest.mark.parametrize(
+    "amp,amp_dtype,expected",
+    [
+        (False, "bf16", None),
+        (True, None, torch.float16),
+        (True, "fp16", torch.float16),
+        (True, "bf16", torch.bfloat16),
+    ],
+)
+def test_amp_dtype_and_scaler(
+    tmp_pipeline, mist_args, monkeypatch, amp, amp_dtype, expected
+):
+    """training.amp_dtype picks the autocast dtype; only fp16 gets a scaler."""
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda *a: (9, 0))
+    results, _ = tmp_pipeline
+    cfg = json.loads((Path(results) / "config.json").read_text())
+    cfg["training"]["amp"] = amp
+    if amp_dtype is None:
+        cfg["training"].pop("amp_dtype", None)
+    else:
+        cfg["training"]["amp_dtype"] = amp_dtype
+    (Path(results) / "config.json").write_text(json.dumps(cfg))
+
+    trainer = DummyTrainer(mist_args)
+    state = trainer.build_components(rank=0, world_size=1)
+    assert state["autocast_dtype"] == expected
+    assert (state["scaler"] is not None) == (expected == torch.float16)
+
+
+def test_amp_dtype_invalid_raises(tmp_pipeline, mist_args):
+    results, _ = tmp_pipeline
+    cfg = json.loads((Path(results) / "config.json").read_text())
+    cfg["training"]["amp"] = True
+    cfg["training"]["amp_dtype"] = "fp8"
+    (Path(results) / "config.json").write_text(json.dumps(cfg))
+    with pytest.raises(ValueError, match="amp_dtype"):
+        DummyTrainer(mist_args)._amp_dtype()
+
+
+def test_load_checkpoint_rejects_amp_dtype_change(
+    tmp_pipeline, mist_args, monkeypatch
+):
+    """Resuming a bf16 checkpoint under fp16 (or vice versa) is refused."""
+    monkeypatch.setattr(torch, "save", _real_torch_save)
+    monkeypatch.setattr(torch, "load", _real_torch_load)
+    trainer = DummyTrainer(mist_args)
+    state = trainer.build_components(rank=0, world_size=1)
+    _real_torch_save(
+        {"amp_dtype": "bf16", "epoch": 1, "global_step": 1, "best_val_loss": 1.0},
+        trainer._checkpoint_path(0),
+    )
+    trainer.config["training"]["amp"] = True
+    trainer.config["training"]["amp_dtype"] = "fp16"
+    with pytest.raises(ValueError, match="Cannot resume"):
+        trainer.load_checkpoint(fold=0, state=state)
+
+
+def test_bf16_rejected_on_pre_ampere_gpu(tmp_pipeline, mist_args, monkeypatch):
+    """bf16 fails fast with a clear message on V100-class GPUs."""
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda *a: (7, 0))
+    monkeypatch.setattr(torch.cuda, "get_device_name", lambda *a: "Tesla V100")
+    results, _ = tmp_pipeline
+    cfg = json.loads((Path(results) / "config.json").read_text())
+    cfg["training"]["amp"] = True
+    cfg["training"]["amp_dtype"] = "bf16"
+    (Path(results) / "config.json").write_text(json.dumps(cfg))
+    with pytest.raises(ValueError, match="no bf16 support"):
+        DummyTrainer(mist_args)

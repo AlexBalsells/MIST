@@ -1,5 +1,6 @@
 """3D patch trainer for MIST built on top of BaseTrainer."""
 
+import contextlib
 from typing import Any
 
 import torch
@@ -137,27 +138,17 @@ class Patch3DTrainer(BaseTrainer):
             "grad_clip_norm", constants.GRAD_CLIP_VALUE
         )
 
+        # Mixed precision: fp16 uses a GradScaler, bf16 autocasts without one.
+        autocast_dtype = state.get(
+            "autocast_dtype", torch.float16 if scaler is not None else None
+        )
+        autocast = (
+            torch.autocast(device_type="cuda", dtype=autocast_dtype)
+            if autocast_dtype is not None else contextlib.nullcontext()
+        )
+
         optimizer.zero_grad()
-        if scaler is not None:
-            with torch.autocast(device_type="cuda", dtype=torch.float16):
-                output = model(image)
-
-                y_deep_supervision = output.get("deep_supervision", None)
-                loss = criterion(
-                    y_true=label,
-                    y_pred=output["prediction"],
-                    y_supervision=y_deep_supervision,
-                    alpha=alpha,
-                    dtm=dtm,
-                    **extra_loss_kwargs,
-                )
-
-            scaler.scale(loss).backward()
-            scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_norm)
-            scaler.step(optimizer)
-            scaler.update()
-        else:
+        with autocast:
             output = model(image)
 
             y_deep_supervision = output.get("deep_supervision", None)
@@ -170,6 +161,13 @@ class Patch3DTrainer(BaseTrainer):
                 **extra_loss_kwargs,
             )
 
+        if scaler is not None:
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_norm)
+            scaler.step(optimizer)
+            scaler.update()
+        else:
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_norm)
             optimizer.step()
