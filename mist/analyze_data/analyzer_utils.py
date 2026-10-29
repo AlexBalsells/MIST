@@ -555,6 +555,7 @@ def build_base_config() -> dict[str, Any]:
                     "cutout": True,
                     "channel_dropout": False,
                     "slice_dropout": False,
+                    "permute_axes": False,
                 },
             },
             "hardware": {

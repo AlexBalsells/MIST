@@ -168,6 +168,9 @@ class TrainPipeline(GenericPipeline):
             randomly chosen spatial axis of the input image during
             augmentation, applied independently per channel. Applied after
             channel dropout.
+        use_axis_permutation: Whether to randomly permute the spatial axes of
+            each patch, choosing one of the six permutations with equal
+            probability. Requires all entries of roi_size to be equal.
         n_channels: The number of channels in the input image. Required when
             use_channel_dropout is True.
         random_rotation_axis: Whether the rotation axis (see use_rotation) is
@@ -202,6 +205,7 @@ class TrainPipeline(GenericPipeline):
         use_cutout: bool = True,
         use_channel_dropout: bool = False,
         use_slice_dropout: bool = False,
+        use_axis_permutation: bool = False,
         n_channels: int | None = None,
         random_rotation_axis: bool = False,
         target_spacing: tuple[float, float, float] | None = None,
@@ -265,6 +269,7 @@ class TrainPipeline(GenericPipeline):
             self.use_cutout = False
             self.use_channel_dropout = False
             self.use_slice_dropout = False
+            self.use_axis_permutation = False
         else:
             self.use_flips = use_flips
             self.use_zoom = use_zoom
@@ -276,6 +281,12 @@ class TrainPipeline(GenericPipeline):
             self.use_cutout = use_cutout
             self.use_channel_dropout = use_channel_dropout
             self.use_slice_dropout = use_slice_dropout
+            self.use_axis_permutation = use_axis_permutation
+            if use_axis_permutation and len(set(roi_size)) != 1:
+                raise ValueError(
+                    "Axis permutation augmentation requires a cubic patch "
+                    f"size, but got {tuple(roi_size)}."
+                )
 
     def load_data(self):
         """Load the image, label, and DTM data from the input readers."""
@@ -534,10 +545,10 @@ class TrainPipeline(GenericPipeline):
         if self.random_rotation_axis:
             # Draw the rotation axis uniformly at random, per sample, from
             # the three canonical spatial axes.
-            axis_idx = fn.cast(
-                fn.random.uniform(range=(0.0, 3.0)),
-                dtype=types.DALIDataType.INT32,
-            )
+            # fn.random.choice samples the three indices exactly uniformly. A
+            # rounding cast of uniform(0, 3) skews the draw and can yield 3,
+            # which produces an all-zero axis vector.
+            axis_idx = fn.random.choice([0, 1, 2])
             axis = fn.stack(
                 fn.cast(axis_idx == 0, dtype=types.DALIDataType.FLOAT),
                 fn.cast(axis_idx == 1, dtype=types.DALIDataType.FLOAT),
@@ -600,6 +611,9 @@ class TrainPipeline(GenericPipeline):
 
             if self.use_augmentation and self.use_flips:
                 image, label, dtm = self.flips_fn(image, label, dtm)
+
+            if self.use_axis_permutation:
+                image, label, dtm = utils.permute_axes_fn(image, label, dtm)
         else:
             image, label = self.load_data()
             if self.extract_patches:
@@ -614,6 +628,9 @@ class TrainPipeline(GenericPipeline):
 
                 if self.use_rotation:
                     image, label = self.rotation_fn(image, label)
+
+                if self.use_axis_permutation:
+                    image, label = utils.permute_axes_fn(image, label)
 
         # Apply random augmentations to the image data only.
         if self.use_augmentation:
@@ -741,6 +758,7 @@ def get_training_dataset(
     use_cutout: bool = True,
     use_channel_dropout: bool = False,
     use_slice_dropout: bool = False,
+    use_axis_permutation: bool = False,
     n_channels: int | None = None,
     random_rotation_axis: bool = False,
     target_spacing: tuple[float, float, float] | None = None,
@@ -793,6 +811,9 @@ def get_training_dataset(
             randomly chosen spatial axis of the input image during
             augmentation, applied independently per channel. Applied after
             channel dropout.
+        use_axis_permutation: Whether to randomly permute the spatial axes of
+            each patch, choosing one of the six permutations with equal
+            probability. Requires a cubic roi_size.
         n_channels: The number of channels in the input image. Required when
             use_channel_dropout is True.
         random_rotation_axis: Whether the rotation axis (see use_rotation) is
@@ -850,6 +871,9 @@ def get_training_dataset(
         use_cutout=use_cutout if use_augmentation else False,
         use_channel_dropout=use_channel_dropout if use_augmentation else False,
         use_slice_dropout=use_slice_dropout if use_augmentation else False,
+        use_axis_permutation=(
+            use_axis_permutation if use_augmentation else False
+        ),
         n_channels=n_channels,
         random_rotation_axis=random_rotation_axis,
         target_spacing=target_spacing,

@@ -381,6 +381,45 @@ def slice_dropout_fn(
     return fn.cat(*channels, axis=3)
 
 
+def permute_axes_fn(*tensors: TensorGPU) -> tuple[TensorGPU, ...]:
+    """Randomly permute the spatial axes of DHWC tensors, jointly.
+
+    One of the six permutations of the (D, H, W) axes is drawn uniformly at
+    random per sample and applied identically to every input tensor, so
+    images, labels, and DTMs stay aligned. The channel axis is untouched.
+    fn.transpose only accepts a static permutation, so all six transposed
+    versions are computed and the drawn one is selected with a one-hot mask.
+    The spatial axes must have equal size for the permuted tensors to share
+    the input shape.
+
+    Args:
+        *tensors: DHWC tensors with equal spatial sizes.
+
+    Returns:
+        A tuple with the permuted version of each input tensor.
+    """
+    perm_idx = fn.random.choice(
+        list(range(len(constants.AXIS_PERMUTATIONS)))
+    )
+    selected = [
+        fn.cast(perm_idx == k, dtype=types.DALIDataType.BOOL)
+        for k in range(len(constants.AXIS_PERMUTATIONS))
+    ]
+    permuted = []
+    for tensor in tensors:
+        out = None
+        for mask, perm in zip(selected, constants.AXIS_PERMUTATIONS):
+            # Transpose also permutes the layout string, so reset it to keep
+            # the six candidates summable.
+            transposed = fn.reshape(
+                fn.transpose(tensor, perm=[*perm, 3]), layout="DHWC"
+            )
+            candidate = mask * transposed
+            out = candidate if out is None else out + candidate
+        permuted.append(out)
+    return tuple(permuted)
+
+
 def resolve_fixed_rotation_axis(
         target_spacing: Sequence[float] | None,
 ) -> tuple[float, float, float]:

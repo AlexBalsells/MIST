@@ -321,6 +321,31 @@ def test_add_train_args_defaults_and_basic_parse(patched_registries):
     assert ns.resume is False
 
 
+def test_add_train_args_augmentation_toggles(patched_registries):
+    """Rotation and axis permutation flags default to None and toggle."""
+    parser = _mk_parser()
+    args_mod.add_train_args(parser)
+
+    ns = parser.parse_args([])
+    assert ns.rotation is None
+    assert ns.random_rotation_axis is None
+    assert ns.permute_axes is None
+
+    ns = parser.parse_args(
+        ["--rotation", "--random-rotation-axis", "--permute-axes"]
+    )
+    assert ns.rotation is True
+    assert ns.random_rotation_axis is True
+    assert ns.permute_axes is True
+
+    ns = parser.parse_args(
+        ["--no-rotation", "--no-random-rotation-axis", "--no-permute-axes"]
+    )
+    assert ns.rotation is False
+    assert ns.random_rotation_axis is False
+    assert ns.permute_axes is False
+
+
 def test_add_train_args_full_parse_success(patched_registries):
     """add_train_args correctly parses a full set of valid arguments."""
     parser = _mk_parser()

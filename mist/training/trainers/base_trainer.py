@@ -240,6 +240,23 @@ class BaseTrainer(ABC):
                 self.mist_args.l2_penalty
             )
 
+        # Overwrite the rotation augmentation settings if specified.
+        rotation = getattr(self.mist_args, "rotation", None)
+        if rotation is not None:
+            self.config["training"]["augmentation"]["transforms"][
+                "rotation"
+            ] = bool(rotation)
+        permute_axes = getattr(self.mist_args, "permute_axes", None)
+        if permute_axes is not None:
+            self.config["training"]["augmentation"]["transforms"][
+                "permute_axes"
+            ] = bool(permute_axes)
+        random_axis = getattr(self.mist_args, "random_rotation_axis", None)
+        if random_axis is not None:
+            self.config["training"]["augmentation"][
+                "random_rotation_axis"
+            ] = bool(random_axis)
+
         # Overwrite the learning rate scheduler and its parameters if specified
         # in command line arguments.
         if self.mist_args.learning_rate is not None:

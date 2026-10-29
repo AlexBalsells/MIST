@@ -78,6 +78,9 @@ class Patch3DTrainer(BaseTrainer):
             use_slice_dropout=(
                 training["augmentation"]["transforms"]["slice_dropout"]
             ),
+            use_axis_permutation=training["augmentation"]["transforms"].get(
+                "permute_axes", False
+            ),
             n_channels=self.config["model"]["params"]["in_channels"],
             random_rotation_axis=training["augmentation"]["random_rotation_axis"],
             target_spacing=self.config["spatial_config"]["target_spacing"],

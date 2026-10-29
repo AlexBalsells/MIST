@@ -60,6 +60,35 @@ class TestTrainPipelineInit:
                      "use_brightness", "use_contrast"):
             assert not getattr(pipeline, flag)
 
+    def test_axis_permutation_accepts_cubic_patch(self, base_pipeline_args):
+        """Axis permutation is enabled for a cubic patch size."""
+        pipeline = dali_loader.TrainPipeline(
+            **{**base_pipeline_args, "use_axis_permutation": True}
+        )
+        assert pipeline.use_axis_permutation
+
+    def test_axis_permutation_rejects_non_cubic_patch(self, base_pipeline_args):
+        """Axis permutation requires equal patch dimensions."""
+        args = {
+            **base_pipeline_args,
+            "roi_size": (64, 64, 32),
+            "use_axis_permutation": True,
+        }
+        with pytest.raises(ValueError, match="cubic patch size"):
+            dali_loader.TrainPipeline(**args)
+
+    def test_axis_permutation_off_when_augmentation_disabled(
+        self, base_pipeline_args
+    ):
+        """No cubic check or permutation when augmentation is disabled."""
+        args = {
+            **base_pipeline_args,
+            "roi_size": (64, 64, 32),
+            "use_axis_permutation": True,
+            "use_augmentation": False,
+        }
+        assert not dali_loader.TrainPipeline(**args).use_axis_permutation
+
     @pytest.mark.parametrize("bad_arg,expected_message", [
         ("image", "Input images are not valid"),
         ("label", "Input labels are not valid"),

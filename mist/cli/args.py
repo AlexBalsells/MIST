@@ -219,6 +219,30 @@ def add_train_args(parser: ArgParser) -> None:
     g.add_argument(
         "--l2-penalty", type=positive_float, help="L2 penalty (weight decay).",
     )
+    g.add_argument(
+        "--rotation",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Enable or disable rotation augmentation (default: config).",
+    )
+    g.add_argument(
+        "--permute-axes",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Enable or disable random permutation of the patch's spatial "
+            "axes (requires a cubic patch size; default: config)."
+        ),
+    )
+    g.add_argument(
+        "--random-rotation-axis",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Draw the rotation axis at random per sample instead of using "
+            "the fixed axis (default: config)."
+        ),
+    )
     g.add_argument("--folds", nargs="+", type=int, help="Specify which folds to run.")
     g.add_argument(
         "--val-percent",

@@ -67,6 +67,18 @@ class DataLoadingConstants:
     # (analyzer_constants.MAX_DIVIDED_BY_MIN_SPACING_THRESHOLD).
     ROTATION_AXIS_ANISOTROPY_THRESHOLD = 3.0
 
+    # Spatial axis permutations (of the D, H, W axes) for the axis permutation
+    # augmentation. One is chosen uniformly at random per sample, so each of
+    # the six has probability 1/6. The first entry is the identity.
+    AXIS_PERMUTATIONS = (
+        (0, 1, 2),
+        (0, 2, 1),
+        (1, 0, 2),
+        (2, 1, 0),
+        (2, 0, 1),
+        (1, 2, 0),
+    )
+
     # Cutout function probability
     CUTOUT_FN_PROBABILITY = 0.5
 
