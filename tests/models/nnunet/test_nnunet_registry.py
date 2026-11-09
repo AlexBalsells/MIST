@@ -4,6 +4,7 @@ import pytest
 # MIST imports.
 from mist.models.nnunet.nnunet_registry import (
     create_nnunet,
+    create_nnunet_plain,
     create_nnunet_pocket,
 )
 from mist.models.nnunet.mist_nnunet import NNUNet
@@ -30,6 +31,23 @@ def test_create_nnunet_pocket_success(valid_config):
     """Test that create_nnunet_pocket returns an NNUNet instance."""
     model = create_nnunet_pocket(**valid_config)
     assert isinstance(model, NNUNet)
+
+
+def test_create_nnunet_plain_is_non_residual(valid_config):
+    """nnunet-plain uses plain conv blocks (no residual conv3/norm3 layers)."""
+    plain = create_nnunet_plain(**valid_config)
+    residual = create_nnunet(**valid_config)
+    assert isinstance(plain, NNUNet)
+    assert plain.unet.use_deep_supervision
+    assert not any(".conv3." in k or ".norm3." in k for k in plain.state_dict())
+    assert any(".conv3." in k for k in residual.state_dict())
+
+
+def test_nnunet_plain_registered():
+    """The nnunet-plain name resolves through the model registry."""
+    import mist.models  # noqa: F401  pylint: disable=unused-import
+    from mist.models.model_registry import list_registered_models
+    assert "nnunet-plain" in list_registered_models()
 
 
 @pytest.mark.parametrize("missing_key", [

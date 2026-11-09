@@ -1,7 +1,11 @@
 """Initialize and register all MIST model variants."""
 
 # Trigger registration of all model variants.
-from mist.models.nnunet.nnunet_registry import create_nnunet, create_nnunet_pocket  # noqa: F401
+from mist.models.nnunet.nnunet_registry import (  # noqa: F401
+    create_nnunet,
+    create_nnunet_plain,
+    create_nnunet_pocket,
+)
 from mist.models.mednext.mednext_registry import (  # noqa: F401
     create_mednext_small,
     create_mednext_base,
